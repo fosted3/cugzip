@@ -3,6 +3,7 @@
 #include <cstdlib>
 #include <vector>
 #include <map>
+#include <cassert>
 
 //The CRC32 function, and its corresponding table, are available on
 //http://www.opensource.apple.com/source/xnu/xnu-1456.1.26/bsd/libkern/crc32.c
@@ -63,13 +64,50 @@ uint32_t crc32(uint32_t crc, const std::vector<uint8_t> *data, size_t offset, si
 	return crc ^ ~0U;
 }
 
+uint32_t get_three(const std::vector<uint8_t> *data, size_t offset)
+{
+	return (uint32_t) 0x00FFFFFF & ((data -> at(offset + 2) <<  16) | (data -> at(offset + 1) << 8) | (data -> at(offset)));
+}
+
 struct lz77_data
 {
 	std::vector<uint8_t>  *uncompressed_data;	//Unmodified data
-	std::vector<bool>     *has_match;			//Where true, data can be replaced with a length-distance pair
+	std::vector<bool>     *is_match;			//Where true, data can be replaced with a length-distance pair
+	std::vector<bool>     *is_reference;		//Where true, data is reference to length-distance pair
 	std::vector<uint8_t>  *length;				//Length data when has_match is true
 	std::vector<uint16_t> *distance;			//Distance data when has_match is true
 };
+
+size_t expand_matches(std::vector<uint8_t> *data, std::vector<size_t> *matches)
+{
+	assert(matches -> size() > 1);
+	size_t max_length = 258;
+	for (size_t i = 0; i < matches -> size() - 1; i++)
+	{
+		if (max_length > (matches -> at(i + 1) - matches -> at(i))) { max_length = matches -> at(i + 1) - matches -> at(i); }
+	}
+	if (data -> size() - matches -> at(matches -> size() - 1) < max_length)
+	{
+		max_length = data -> size() - matches -> at(matches -> size() - 1);
+	}
+	size_t return_val = 3;
+	bool all_match = true;
+	for (size_t length = 4; length <= max_length; length++)
+	{
+		uint8_t first_byte = data -> at(matches -> at(0) + length - 1);
+		for (size_t i = 1; i < matches -> size(); i++)
+		{
+			if (data -> at(matches -> at(i) + length - 1) != first_byte)
+			{
+				all_match = false;
+				break;
+			}
+		}
+		if (all_match) { return_val = length; }
+		else { break; }	
+	}
+	return return_val;
+}
 
 /*	The lz77_cpu function performs length-distance encoding of the input.
  *	
@@ -81,15 +119,16 @@ lz77_data* lz77_cpu(std::vector<uint8_t> *data)
 	//crc_data.reserve(data -> size() - 2);
 	//std::vector<size_t> index_data;
 	//index_data.reserve(data -> size() - 2);
-	std::map<uint32_t, std::vector<size_t> > hash_table;
+	std::map<uint32_t, std::vector<size_t> > match_table;
 	std::map<uint32_t, std::vector<size_t> >::iterator itr;
-	uint32_t hash_temp;
+	uint32_t match_temp;
 	struct lz77_data *lz77_return = new lz77_data;
 	lz77_return -> uncompressed_data = data;
-	lz77_return -> has_match = new std::vector<bool>(data -> size(), false);
+	lz77_return -> is_match = new std::vector<bool>(data -> size(), false);
+	lz77_return -> is_reference = new std::vector<bool>(data -> size(), false);
 	lz77_return -> length = new std::vector<uint8_t>(data -> size());
 	lz77_return -> distance = new std::vector<uint16_t>(data -> size());
-	for (size_t str_len = 258; str_len > 255; str_len--)
+	/*for (size_t str_len = 258; str_len > 255; str_len--)
 	{
 		std::cout << str_len << std::endl;
 		//crc_data.resize(data -> size() + 1 - str_len);
@@ -112,6 +151,7 @@ lz77_data* lz77_cpu(std::vector<uint8_t> *data)
 			//crc_data[i] = crc32(0, data, i, str_len);
 			//index_data[i] = i;
 		}
+		
 		//now that the hash table has been generated - we can start doing replacements
 		//one thing to check is that there are no repitions of substrings within the found substrings.
 		//e.g. abcabcabcabc would be better compressed with abc[x,y] than abcabc[x,y]
@@ -122,13 +162,70 @@ lz77_data* lz77_cpu(std::vector<uint8_t> *data)
 			{
 			}
 		}
+	}*/
+	for (size_t i = 0; i < data -> size() - 2; i++)
+	{
+		match_temp = get_three(data, i);
+		itr = match_table.find(match_temp);
+		if (itr == match_table.end())
+		{
+			match_table.insert(std::make_pair(match_temp, std::vector<size_t>(1, i)));
+			std::cout << "New match " << match_temp << std::endl;
+		}
+		else
+		{
+			itr -> second.push_back(i);
+			//std::cout << "Match found, vector size is now " << itr -> second.size() << std::endl;
+		}
 	}
-	return 0;
+	for (size_t i = 0; i < data -> size() - 2; i++)
+	{
+		match_temp = get_three(data, i);
+		std::vector<size_t> *matches = &(match_table[match_temp]);
+		if (matches -> size() > 1 && !(lz77_return -> is_match -> at(i)) && !(lz77_return -> is_reference -> at(i)))
+		{
+			size_t full_length = expand_matches(data, matches);
+			std::cout << "Expanded match " << match_temp << " to " << full_length << std::endl;
+			for (size_t j = 0; j < matches -> size(); j++)
+			{
+				if (j && matches -> at(j) - matches -> at(j - 1) < 0x1000) //We have reference within range
+				{
+					
+					for (size_t k = 0; k < full_length; k++)
+					{
+						(*(lz77_return -> is_match))[matches -> at(j) + k] = true;
+					}
+				}
+				else if (j < matches -> size() - 1 && matches -> at(j + 1) - matches -> at(j) < 0x1000) //We have matches after within range & not a current match
+				{
+					if (matches -> at(j + 1) - matches -> at(j) > full_length
+					for (size_t k = 0; k < full_length; k++)
+					{
+						(*(lz77_return -> is_reference))[matches -> at(j) + k] = true;
+					}
+				}
+				/*for (size_t k = 0; k < full_length; k++)
+				{
+					if (j)
+					{
+						(*(lz77_return -> is_match))[matches -> at(j) + k] = true;
+					}
+					else
+					{
+						(*(lz77_return -> is_reference))[matches -> at(j) + k] = true;
+					}
+				}*/
+			}
+		}
+	}
+//(*(lz77_return -> length))[matches -> at(j)] = 
+//(*(lz77_return -> distance))[matches -> at(j)] = matches
+	return lz77_return;
 }
 
 int main(int argc, char **argv)
 {
-	std::vector<uint8_t> test_input(1024*1024);
+	std::vector<uint8_t> test_input(1024*1024); //One MiB of input
 	for (size_t i = 0; i < test_input.size(); i++) { test_input[i] = (uint8_t) (i & 0x000000FF); }
 	lz77_cpu(&test_input);
 	return 0;
