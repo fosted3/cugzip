@@ -1,7 +1,7 @@
 CC=g++
 NVCC=nvcc
-CFLAGS=-c -Wall -g -O2 -std=c++11 -Wextra -march=native -mtune=native -pg
-CUDA_CFLAGS=-c -Wall -g -G -O2 -std=c++11 -Wextra -m64 -arch=compute_30 -code=sm_30
+CFLAGS=-c -Wall -g -Og -std=c++11 -Wextra -march=native -mtune=native -pg
+CUDA_CFLAGS=-c -Wall -g -G -Og -std=c++11 -Wextra -m64 -arch=compute_30 -code=sm_30
 LDFLAGS=-lpthread -pg
 CUDA_LDFLAGS=-lcuda -lcudart
 EXECUTABLE=bin/cugzip
