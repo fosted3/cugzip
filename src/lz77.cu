@@ -64,8 +64,10 @@ __global__ void lz77_stage1(uint8_t *data, uint32_t size, uint32_t *hashes, uint
 	const uint32_t idx = blockIdx.x * blockDim.x + threadIdx.x;
 	if (idx < size)
 	{
-		hashes[idx] = *((uint32_t*) (data + idx)) & 0x00FFFFFF;
+		hashes[idx] = ((uint32_t) (data[idx + 2] << 16) | ((uint32_t) (data[idx + 1] << 8)) | ((uint32_t) (data[idx]))) & 0x00FFFFFF;
+		//printf("Set idx %d data %x %x %x to %x\n", idx, data[idx], data[idx+1], data[idx+2], hashes[idx]);
 		idx_list[idx] = idx;
+		//printf("Set idx %d to %u\n", idx, idx_list[idx]);
 	}
 }
 
@@ -77,8 +79,8 @@ lz77_data* lz77_cuda(std::vector<uint8_t> *data)
 	uint8_t *device_file = NULL;
 	uint32_t *device_idx_list = NULL;
 	uint32_t *device_hashes = NULL;
-	//thrust::device_vector<uint32_t> device_hashes_vector(data_size);
-	//uint32_t *device_hashes = device_hashes_vector.data();
+	//thrust::device_vector<uint32_t> device_hashes_vector;
+	//uint32_t *device_hashes = thrust::raw_pointer_cast(device_hashes_vector.data());
 	if (data -> size() % block_size) { grid_size++; }
 	handle_error(cudaMalloc(&device_file, data -> size()));
 	handle_error(cudaMalloc(&device_idx_list, data_size * sizeof(uint32_t)));
@@ -90,12 +92,13 @@ lz77_data* lz77_cuda(std::vector<uint8_t> *data)
 	lz77_stage1<<<grid_size, block_size>>>(device_file, data -> size() - 2, device_hashes, device_idx_list);
 	handle_error(cudaDeviceSynchronize());
 	//thrust::stable_sort_by_key(device_hashes, device_hashes + data_size, device_idx_list); 
-	thrust::device_vector<uint32_t> histogram_input;
+	thrust::device_vector<uint32_t> histogram_input(data_size, 0);
 	thrust::device_vector<uint32_t> histogram_values;
 	thrust::device_vector<uint32_t> histogram_counts;
-	thrust::device_ptr<uint32_t> hash_ptr(device_hashes);
-	thrust::copy(device_hashes, device_hashes + data_size, histogram_input.begin());
-	//thrust::copy(device_hashes_vector.begin(), device_hashes_vector.end(), histogram_data.begin();
+	//thrust::device_ptr<uint32_t> hash_ptr(device_hashes);
+	//thrust::copy(device_hashes, device_hashes + data_size, histogram_input.begin());
+	//thrust::copy(device_hashes_vector.begin(), device_hashes_vector.end(), histogram_input.begin());
+	handle_error(cudaMemcpy(thrust::raw_pointer_cast(histogram_input.data()), device_hashes, data_size * sizeof(uint32_t), cudaMemcpyDeviceToDevice));
 	thrust::sort(histogram_input.begin(), histogram_input.end());
 	uint32_t unique_keys = thrust::inner_product(histogram_input.begin(), histogram_input.end() - 1, histogram_input.begin() + 1, (uint32_t) 1, thrust::plus<uint32_t>(), thrust::not_equal_to<uint32_t>());
 	histogram_values.resize(unique_keys);
