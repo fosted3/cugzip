@@ -34,3 +34,6 @@ build/aux.cpp.o: src/aux.cpp
 
 clean:
 	rm -f build/* bin/*
+
+doc: doc/paper.tex doc/paper.bib
+	cd doc/ && latex paper.tex && bibtex paper && latex paper.tex && latex paper.tex && dvips paper.dvi && ps2pdf paper.ps
