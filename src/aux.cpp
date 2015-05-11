@@ -51,12 +51,12 @@ static uint32_t crc32_tab[] = {
 	0x54de5729, 0x23d967bf, 0xb3667a2e, 0xc4614ab8, 0x5d681b02, 0x2a6f2b94,
 	0xb40bbe37, 0xc30c8ea1, 0x5a05df1b, 0x2d02ef8d};
 
-uint32_t crc32(uint32_t crc, const std::vector<uint8_t> *data, size_t offset, size_t length)
+uint32_t crc32(uint32_t crc, const uint8_t* data, size_t offset, size_t length)
 {
 	crc = crc ^ ~0U;
 	for (size_t i = offset; i < offset + length; i++)
 	{
-		crc = crc32_tab[(crc ^ (*data)[i]) & 0xFF] ^ (crc >> 8);
+		crc = crc32_tab[(crc ^ data[i]) & 0xFF] ^ (crc >> 8);
 	}
 	return crc ^ ~0U;
 }

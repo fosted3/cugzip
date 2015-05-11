@@ -71,12 +71,29 @@ __global__ void lz77_stage1(uint8_t *data, uint32_t size, uint32_t *hashes, uint
 	}
 }
 
+__global__ void lz77_stage2(uint32_t *sorted_hashes, uint32_t size, uint32_t *idx_list, uint32_t *out)
+{
+	const uint32_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+	if (idx < size)
+	{
+		if (sorted_hashes[idx] != sorted_hashes[idx + 1])
+		{
+			out[idx + 1] = idx_list[idx + 1];
+		}
+		else
+		{
+			out[idx + 1] = 0xFFFFFFFF;
+		}
+	}
+}
+
 lz77_data* lz77_cuda(std::vector<uint8_t> *data)
 {
 	uint32_t block_size = 1024;
 	uint32_t grid_size = data -> size() / block_size;
 	uint32_t data_size = data -> size() - 2;
 	uint8_t *device_file = NULL;
+	
 	uint32_t *device_idx_list = NULL;
 	uint32_t *device_hashes = NULL;
 	//thrust::device_vector<uint32_t> device_hashes_vector;

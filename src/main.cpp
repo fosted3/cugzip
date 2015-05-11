@@ -3,52 +3,20 @@
 #include <cstdlib>
 #include <vector>
 #include <map>
+#include <string>
 //#include <unordered_set>
+//#include <queue>
 #include <cassert>
+#include <ctime>
+#include <cstring>
+#include <fstream>
 #include "aux.h"
 #include "cu_header.h"
+
 
 uint32_t get_three(const std::vector<uint8_t> *data, size_t offset)
 {
 	return (uint32_t) 0x00FFFFFF & ((data -> at(offset + 2) <<  16) | (data -> at(offset + 1) << 8) | (data -> at(offset)));
-}
-
-size_t expand_matches(std::vector<uint8_t> *data, std::vector<size_t> *matches)
-{
-	assert(matches -> size() > 1);
-	size_t max_length = 258;
-	for (size_t i = 0; i < matches -> size() - 1; i++)
-	{
-		if (max_length > (matches -> at(i + 1) - matches -> at(i))) { max_length = matches -> at(i + 1) - matches -> at(i); }
-	}
-	if (data -> size() - matches -> at(matches -> size() - 1) < max_length)
-	{
-		max_length = data -> size() - matches -> at(matches -> size() - 1);
-	}
-	if (max_length == 2) { max_length = 4; }
-	if (max_length == 1) { return 1; }
-	size_t return_val = 3;
-	bool all_match = true;
-	for (size_t length = 4; length <= max_length; length++)
-	{
-		uint8_t first_byte = data -> at(matches -> at(0) + length - 1);
-		for (size_t i = 1; i < matches -> size(); i++)
-		{
-			if (!((matches -> at(i) + length - 1) < data -> size()))
-			{
-				all_match = false;
-				break;
-			}
-			if (data -> at(matches -> at(i) + length - 1) != first_byte)
-			{
-				all_match = false;
-				break;
-			}
-		}
-		if (all_match) { return_val = length; }
-		else { break; }
-	}
-	return return_val;
 }
 
 /*	The lz77_cpu function performs length-distance encoding of the input.
@@ -57,13 +25,12 @@ size_t expand_matches(std::vector<uint8_t> *data, std::vector<size_t> *matches)
 
 lz77_data* lz77_cpu(std::vector<uint8_t> *data)
 {
-	std::map<uint32_t, std::vector<size_t> > match_table;
-	std::map<uint32_t, std::vector<size_t> >::iterator itr;
+	std::map<uint32_t, size_t> match_table;
+	std::map<uint32_t, size_t>::iterator itr;
 	uint32_t match_temp;
 	struct lz77_data *lz77_return = new lz77_data;
 	lz77_return -> uncompressed_data = data;
 	lz77_return -> is_match = new std::vector<bool>(data -> size(), false);
-	lz77_return -> is_reference = new std::vector<bool>(data -> size(), false);
 	lz77_return -> length = new std::vector<uint8_t>;
 	lz77_return -> distance = new std::vector<uint16_t>;
 	lz77_return -> index = new std::vector<size_t>;
@@ -73,143 +40,213 @@ lz77_data* lz77_cpu(std::vector<uint8_t> *data)
 		itr = match_table.find(match_temp);
 		if (itr == match_table.end())
 		{
-			match_table.insert(std::make_pair(match_temp, std::vector<size_t>(1, i)));
-			//std::cout << "New match " << match_temp << std::endl;
+			match_table.insert(std::make_pair(match_temp, i));
 		}
 		else
 		{
-			itr -> second.push_back(i);
-			//std::cout << "Match found, vector size is now " << itr -> second.size() << std::endl;
-		}
-	}
-	for (size_t i = 0; i < data -> size() - 2; i++)
-	{
-		match_temp = get_three(data, i);
-		std::vector<size_t> *matches = &(match_table[match_temp]);
-		if (matches -> size() > 1 && !(lz77_return -> is_match -> at(i)) && !(lz77_return -> is_reference -> at(i)))
-		{
-			size_t full_length = expand_matches(data, matches);
-			std::cout << "Expanded match " << match_temp << " to " << full_length << std::endl;
-			for (size_t j = 0; j < matches -> size(); j++)
+			if (i - (itr -> second) < 0x1000 && !(lz77_return -> is_match -> at(i)))
 			{
-				//std::cout << j << std::endl;
-				if (j && matches -> at(j) - matches -> at(j - 1) < 0x1000 && !(lz77_return -> is_reference -> at(matches -> at(j)))) //We have reference or match within range
+				lz77_return -> distance -> push_back(i - (itr -> second) - 1); //
+				lz77_return -> index -> push_back(i);
+				size_t a = itr -> second + 2;
+				size_t b = i + 2;
+				uint8_t len = 0;
+				for (size_t c = 0; c < 255; c++)
 				{
-					if (matches -> at(j) - matches -> at(j - 1) > full_length) //not edge case
+					if (b + c < data -> size() && data -> at(a + c) == data -> at(b + c))
 					{
-						std::cout << "Not an edge case" << std::endl;
-						lz77_return -> length -> push_back(full_length - 3);
-						lz77_return -> distance -> push_back(matches -> at(j) - matches -> at(j-1) - 1);
-						lz77_return -> index -> push_back(matches -> at(j));
-						for (size_t k = 0; k < full_length; k++)
-						{
-							(*(lz77_return -> is_match))[matches -> at(j) + k] = true;
-						}
-					}
-					else if (matches -> at(j) - matches -> at(j - 1) == full_length && full_length > 2) //Right after (e.g. abcabc), need to check if there's a repeated pattern
-					{
-						size_t actual_length = full_length;
-						for (size_t k = j + 1; k < matches -> size(); k++)
-						{
-							if ((matches -> at(k) == matches -> at(k - 1) - actual_length) && (full_length + actual_length < 259))
-							{
-								actual_length += full_length;
-							}
-							else { break; }
-						}
-						lz77_return -> length -> push_back(actual_length - 3);
-						lz77_return -> distance -> push_back(matches -> at(j) - matches -> at(j - 1) - 1);
-						lz77_return -> index -> push_back(matches -> at(j));
-						for (size_t k = 0; k < actual_length; k++)
-						{
-							(*(lz77_return -> is_match))[matches -> at(j) + k] = true;
-						}
-						std::cout << "Repeated patern case" << std::endl;
-						j += (actual_length / full_length) - 1;
-						//for (size_t k = 0; k < matches -> size(); k++) { std::cout << matches -> at(k) << " "; }
-						//std::cout << std::endl;
-					}
-					else if (full_length == 4) //repeated two bytes, e.g. abababab, but needs to have more than 4 2-pairs
-					{
-						std::cout << "Repeated 2-byte case" << std::endl;
-						size_t start = j;
-						while(j < matches -> size() - 2 && matches -> at(j + 2) - matches -> at(j) == 2) { j += 2; }
-						for (size_t q = 0; q < data -> size(); q++) { std::cout << (char) data -> at(q) << " "; }
-						std::cout << std::endl;
-						for (size_t q = 0; q < data -> size(); q++)
-						{
-							if (q == matches -> at(start) || q == matches -> at(j) + 4) { std::cout << "x "; }
-							else { std::cout << "  "; }
-						}
-						std::cout << std::endl;
-						
-					}
-					else //repeated byte e.g. aaaaaaaaa
-					{
-						std::cout << "Repeated byte case" << std::endl;
-						//assert(j + 1 < matches -> size());
-						size_t start = j;
-						//std::cout << "j: " << j << std::endl;
-						while ((j + 1 < matches -> size()) && matches -> at(j) + 1 == matches -> at(j + 1)) { j++; }
-						//if (j - start < 2) { continue; }
-						//std::cout << j - start << std::endl;
-						lz77_return -> length -> push_back(j - start);
-						lz77_return -> distance -> push_back(2);
-						lz77_return -> index -> push_back(matches -> at(start));
-						for (size_t l = matches -> at(start); l < matches -> at(j) + 3; l++)
-						{
-							(*(lz77_return -> is_match))[l] = true;
-						}
-						for (size_t q = 0; q < data -> size(); q++) { std::cout << (char) data -> at(q) << " "; }
-						std::cout << std::endl;
-						for (size_t q = 0; q < data -> size(); q++)
-						{
-							if (q == matches -> at(start) || q == matches -> at(j) + 2) { std::cout << "x "; }
-							else { std::cout << "  "; }
-						}
-						std::cout << std::endl;
-					}
-				}
-				else if (j < matches -> size() - 1 && matches -> at(j + 1) - matches -> at(j) < 0x1000 && !(lz77_return -> is_reference -> at(matches -> at(j)))) //We have matches after within range & not a current match
-				{
-					std::cout << "Setting up reference. Full length: " << full_length << std::endl;
-					if (full_length == 1)
-					{
-						for (size_t k = 0; k < 3; k++)
-						{
-							(*(lz77_return -> is_reference))[matches -> at(j) + k] = true;
-						}
-					}
-					else if (full_length == 2)
-					{
-						for (size_t k = 0; k < 4; k++)
-						{
-							(*(lz77_return -> is_reference))[matches -> at(j) + k] = true;
-						}
+						len++;
 					}
 					else
 					{
-						for (size_t k = 0; k < full_length; k++)
-						{
-							(*(lz77_return -> is_reference))[matches -> at(j) + k] = true;
-						}
+						break;
 					}
 				}
+				lz77_return -> length -> push_back(len);
+				for (size_t j = 0; j < ((size_t) len) + 3; j++)
+				{
+					(*(lz77_return -> is_match))[i + j] = true;
+				}
+				//printf("Found new match, i: %lu, distance: %x, length: %x\n", i, i - (itr -> second) - 1, len);
 			}
+			itr -> second = i;
 		}
 	}
 	return lz77_return;
 }
 
+void populate_huffman_static(huffman_table *table)
+{
+	for (size_t i = 0; i < 288; i++)
+	{
+		if (i < 144)
+		{
+			table -> codes[i] = 0x30 + i;
+			table -> length[i] = 8;
+		}
+		else if (i < 256)
+		{
+			table -> codes[i] = 0x190 + i - 144;
+			table -> length[i] = 9;
+		}
+		else if (i < 280)
+		{
+			table -> codes[i] = i - 256;
+			table -> length[i] = 7;
+		}
+		else
+		{
+			table -> codes[i] = 0xC0 + i - 280;
+			table -> length[i] = 8;
+		}
+	}
+}
+
+void setup_args(int argc, char **argv, options *args)
+{
+	args -> infile = "";
+	args -> outfile = "";
+	args -> keep = false;
+	args -> verbose = false;
+	args -> gpu = false;
+	for (int i = 1; i < argc; i++)
+	{
+		if (argv[i][0] == '-' && argv[i][1] != '-') //Beginning of single char options
+		{
+			size_t j = 1;
+			while (argv[i][j] != 0) //Null terminated
+			{
+				if (argv[i][j] == 'k')
+				{
+					args -> keep = true;
+				}
+				else if (argv[i][j] == 'v')
+				{
+					args -> verbose = true;
+				}
+				else if (argv[i][j] == 'c')
+				{
+					args -> outfile = "STDOUT";
+				}
+				else if (argv[i][j] == 'g')
+				{
+					args -> gpu = true;
+				}
+			}
+		}
+		else if (argv[i][0] == '-' && argv[i][1] == '-') //Single word options
+		{
+			if (strcmp(argv[i], "--stdout") == 0 || strcmp(argv[i], "--to-stdout") == 0)
+			{
+				args -> outfile = "STDOUT";
+			}
+			else if (strcmp(argv[i], "--keep") == 0)
+			{
+				args -> keep = true;
+			}
+			else if (strcmp(argv[i], "--verbose") == 0)
+			{
+				args -> verbose = true;
+			}
+			else if (strcmp(argv[i], "--gpu") == 0)
+			{
+				args -> gpu = true;
+			}
+			else
+			{
+				std::cerr << "arg " << argv[i] << " unrecognized." << std::endl;
+			}
+		}
+		else //Filename, this *should* be the last arg...
+		{
+			args -> infile = argv[i];
+			if (args -> outfile.compare("") == 0)
+			{
+				args -> outfile = args -> infile;
+				args -> outfile += ".gz";
+			}
+		}
+	}
+	if (args -> infile.compare("") == 0) { args -> infile = "STDIN"; }
+	if (args -> infile.compare("") == 0 || args -> outfile.compare("") == 0)
+	{
+		std::cerr << "input file or output file missing. exiting." << std::endl;
+		exit(1);
+	}
+}
+
+bool deflate_cpu(options *args, blocks *compressed_data)
+{
+	return false;
+}
+
+bool deflate_gpu(options *args, blocks *compressed_data)
+{
+	return false;
+}
+
+bool deflate(options *args)
+{
+	gzip_file compressed_file;
+	compressed_file.id1 = 31;
+	compressed_file.id2 = 139;
+	compressed_file.cm = 8;
+	compressed_file.flg = FNAME | FCOMMENT;
+	compressed_file.mtime = time(0);
+	compressed_file.xfl = 0;
+	compressed_file.os = 3;
+	compressed_file.xlen = 0;
+	compressed_file.extra = 0;
+	compressed_file.fname = new char[args -> infile.size() + 1];
+	args -> infile.copy(compressed_file.fname, args -> infile.size());
+	compressed_file.fname[args -> infile.size()] = 0;
+	char comment[] = "Made with cugzip.";
+	compressed_file.fcomment = comment; //This remvoes the write-string warning about depriciated const char converison
+	compressed_file.crc16 = 0;
+	blocks compressed_data;
+	bool success;
+	if (args -> gpu) { success = deflate_gpu(args, &compressed_data); }
+	else { success = deflate_cpu(args, &compressed_data); }
+	compressed_file.blocks = compressed_data.data;
+	if (compressed_file.blocks == NULL || !success) { return false; }
+	compressed_file.crc32 = compressed_data.crc32;
+	compressed_file.isize = compressed_data.isize;
+	std::fstream outfile(args -> outfile, std::ios::out | std::ios::binary);
+	outfile.seekp(0);
+	outfile.write((const char*) &compressed_file.id1,	1);	//if uint8_t isn't one byte you have problems
+	outfile.write((const char*) &compressed_file.id2,	1);
+	outfile.write((const char*) &compressed_file.cm,	1);
+	outfile.write((const char*) &compressed_file.flg,	1);
+	outfile.write((const char*) &compressed_file.mtime,	4);
+	outfile.write((const char*) &compressed_file.xfl,	1);
+	outfile.write((const char*) &compressed_file.os,	1);
+	outfile.write((const char*) compressed_file.fname,	args -> infile.size() + 1);
+	outfile.write((const char*) compressed_file.fcomment, 18);
+	outfile.write((const char*) compressed_file.blocks, compressed_data.osize);
+	outfile.write((const char*) &compressed_file.crc32, 4);
+	outfile.write((const char*) &compressed_file.isize, 4);
+	outfile.flush();
+	if (!outfile.good()) { return false; }
+	outfile.close();
+	delete[] compressed_data.data;
+	delete[] compressed_file.fname;
+	return true;
+}
+
+
 int main(int argc, char **argv)
 {
-	for (int i = 0; i < argc; i++) { std::cout << argv[i] << std::endl; }
-	std::vector<uint8_t> test_input(1024*1024); //One MiB of input
+	//for (int i = 0; i < argc; i++) { std::cout << argv[i] << std::endl; }
+	//std::vector<uint8_t> test_input(1024*1024*128); //128 MiB of input
 	//std::vector<uint8_t> test_input = {'a', 'a', 'a', 'a', 'a', 'a', 'a', 'b', 'c', 'd', 'b', 'c', 'd', 'f', 'g', 'f', 'g', 'f', 'g', 'f', 'g', 'f', 'g', 'q', 'q', 'q', 'q', 'q', 'q'};
 	//for (size_t i = 0; i < test_input.size(); i++) { test_input[i] = (uint8_t) (i & 0x000000FF); }
 	//for (size_t i = 0; i < test_input.size(); i++) { test_input[i] = 0; }
 	//struct lz77_data *data = lz77_cpu(&test_input);
-	lz77_cuda(&test_input);
+	//lz77_cuda(&test_input);
+	options args;
+	setup_args(argc, argv, &args);
+	if (deflate(&args)) { return 0; }
+	std::cerr << "Error compressing data." << std::endl;
 	//for (size_t i = 0; i < data -> index -> size(); i++) { std::cout << "D: " << data -> distance -> at(i) << ", L: " << (unsigned int) data -> length -> at(i) << ", I: " << data -> index -> at(i) << std::endl; }
-	return 0;
+	return 1;
 }
