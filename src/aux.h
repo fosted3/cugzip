@@ -6,8 +6,6 @@
 #include <cstdlib>
 #include <string>
 
-uint32_t crc32(uint32_t, const std::vector<uint8_t>*, size_t, size_t);
-
 struct lz77_data
 {
 	std::vector<uint8_t>  *uncompressed_data;	//Unmodified data
@@ -30,6 +28,9 @@ struct options
 	bool keep;
 	bool verbose;
 	bool gpu;
+	bool force_static;
+	bool force_dynamic;
+	bool thread;
 };
 
 struct gzip_file
@@ -53,11 +54,17 @@ struct gzip_file
 
 struct blocks
 {
-	uint8_t *data;
-	size_t osize;
+	std::vector<uint8_t> *data;
 	uint32_t crc32;
 	uint32_t isize;
+	bool final;
 };
+
+uint32_t crc32(uint32_t, const std::vector<uint8_t>*, size_t, size_t);
+bool file_exists(std::string);
+void setup_args(int, char**, options*);
+uint32_t get_three(const std::vector<uint8_t>*, size_t);
+void bit_pack(uint8_t*, uint32_t, uint8_t, size_t*, uint8_t*);
 
 #define FTEXT		0x01
 #define FHCRC		0x02

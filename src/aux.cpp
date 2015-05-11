@@ -2,6 +2,12 @@
 #include <cstdint>
 #include <vector>
 #include <cstdlib>
+#include <string>
+#include <fstream>
+#include <cassert>
+#include <cstring>
+#include <iostream>
+
 //The CRC32 function, and its corresponding table, are available on
 //http://www.opensource.apple.com/source/xnu/xnu-1456.1.26/bsd/libkern/crc32.c
 //as open source.
@@ -51,15 +57,159 @@ static uint32_t crc32_tab[] = {
 	0x54de5729, 0x23d967bf, 0xb3667a2e, 0xc4614ab8, 0x5d681b02, 0x2a6f2b94,
 	0xb40bbe37, 0xc30c8ea1, 0x5a05df1b, 0x2d02ef8d};
 
-uint32_t crc32(uint32_t crc, const uint8_t* data, size_t offset, size_t length)
+uint32_t crc32(uint32_t crc, const std::vector<uint8_t> *data, size_t offset, size_t length)
 {
 	crc = crc ^ ~0U;
+	assert(offset + length <= data -> size());
 	for (size_t i = offset; i < offset + length; i++)
 	{
-		crc = crc32_tab[(crc ^ data[i]) & 0xFF] ^ (crc >> 8);
+		crc = crc32_tab[(crc ^ data -> at(i)) & 0xFF] ^ (crc >> 8);
 	}
 	return crc ^ ~0U;
 }
 
+bool file_exists(std::string filename) //Check if a file exists
+{
+	std::ifstream ifile(filename);
+	return ifile;
+}
 
+void setup_args(int argc, char **argv, options *args)
+{
+	args -> infile = "";
+	args -> outfile = "";
+	args -> keep = false;
+	args -> verbose = false;
+	args -> gpu = false;
+	args -> force_static = false;
+	args -> force_dynamic = false;
+	args -> thread = false;
+	for (int i = 1; i < argc; i++)
+	{
+		if (argv[i][0] == '-' && argv[i][1] != '-') //Beginning of single char options
+		{
+			size_t j = 1;
+			while (argv[i][j] != 0) //Null terminated
+			{
+				if (argv[i][j] == 'k')
+				{
+					args -> keep = true;
+				}
+				else if (argv[i][j] == 'v')
+				{
+					args -> verbose = true;
+				}
+				else if (argv[i][j] == 'c')
+				{
+					args -> outfile = "STDOUT";
+				}
+				else if (argv[i][j] == 'g')
+				{
+					args -> gpu = true;
+				}
+				else if (argv[i][j] == 'm')
+				{
+					args -> thread = true;
+				}
+				else
+				{
+					std::cerr << "Option " << argv[i][j] << " not recognized." << std::endl;
+				}
+			}
+		}
+		else if (argv[i][0] == '-' && argv[i][1] == '-') //Single word options
+		{
+			if (strcmp(argv[i], "--stdout") == 0 || strcmp(argv[i], "--to-stdout") == 0)
+			{
+				args -> outfile = "STDOUT";
+			}
+			else if (strcmp(argv[i], "--keep") == 0)
+			{
+				args -> keep = true;
+			}
+			else if (strcmp(argv[i], "--verbose") == 0)
+			{
+				args -> verbose = true;
+			}
+			else if (strcmp(argv[i], "--gpu") == 0)
+			{
+				args -> gpu = true;
+			}
+			else if (strcmp(argv[i], "--force-static") == 0)
+			{
+				args -> force_static = true;
+				if (args -> force_dynamic)
+				{
+					std::cerr << "Error: --force-static and --force-dynamic specified. Forcing static." << std::endl;
+					args -> force_dynamic = false;
+				}
+			}
+			else if (strcmp(argv[i], "--force-dynamic") == 0)
+			{
+				args -> force_dynamic = true;
+				if (args -> force_static)
+				{
+					std::cerr << "Error: --force-static and --force-dynamic specified. Forcing static." << std::endl;
+					args -> force_dynamic = false;
+				}
+			}
+			else if (strcmp(argv[i], "--multithreaded") == 0)
+			{
+				args -> thread = true;
+			}
+			else
+			{
+				std::cerr << "Option " << argv[i] << " unrecognized." << std::endl;
+			}
+		}
+		else //Filename, this *should* be the last arg...
+		{
+			args -> infile = argv[i];
+			if (args -> outfile.compare("") == 0)
+			{
+				args -> outfile = args -> infile;
+				args -> outfile += ".gz";
+			}
+		}
+	}
+	if (args -> infile.compare("") == 0) { args -> infile = "STDIN"; }
+	if (args -> infile.compare("") == 0 || args -> outfile.compare("") == 0)
+	{
+		std::cerr << "IO error. Exiting." << std::endl;
+		exit(1);
+	}
+}
 
+uint32_t get_three(const std::vector<uint8_t> *data, size_t offset)
+{
+	return (uint32_t) 0x00FFFFFF & ((data -> at(offset + 2) <<  16) | (data -> at(offset + 1) << 8) | (data -> at(offset)));
+}
+
+void bit_pack(uint8_t *buf, uint32_t data, uint8_t bits, size_t *cur_byte, uint8_t *cur_bit)
+{
+	uint32_t mask;
+	uint8_t bits_left = bits;
+	do
+	{
+		if (bits_left > 8 - (*cur_bit)) //bits left > bits available
+		{
+			mask = 0xFF;
+			for (uint8_t i = 0; i < *cur_bit; i++)
+			{
+				mask >>= 1;
+			}
+			buf[*cur_byte] |= ((uint8_t) (data & mask)) << *cur_bit;
+			data >>= 8 - *cur_bit;
+			bits_left -= 8 - *cur_bit;
+			(*cur_byte) ++;
+			(*cur_bit) = 0;
+		}
+		else //we have room in the current_byte
+		{
+			buf[*cur_byte] |= data << *cur_bit;
+			(*cur_bit) += bits_left;
+			(*cur_bit) %= 8;
+			bits_left = 0;
+		}
+	} while (bits_left > 0);
+}

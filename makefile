@@ -34,12 +34,3 @@ build/aux.cpp.o: src/aux.cpp
 
 clean:
 	rm -f build/* bin/*
-
-#$(CUDA_EXE): build/particle.o build/octree.o build/vector.o build/thread_functions.o build/cuda_code.o build/cuda_helper.o
-#	mkdir -p $(DIRS)
-#	$(CC) $(CFLAGS) -DCUDA src/main.cpp -o build/main.o
-#	$(NVCC) build/cuda_code.o build/cuda_helper.o build/main.o build/vector.o build/particle.o build/octree.o build/thread_functions.o -o $(CUDA_EXE) $(CUDA_LDFLAGS) $(LDFLAGS)
-#
-#build/cuda_code.o: src/cuda_code.cu
-#	mkdir -p $(DIRS)
-#	$(NVCC) $(CUDA_CFLAGS) src/cuda_code.cu -o build/cuda_code.o $(CUDA_INCLUDES)
