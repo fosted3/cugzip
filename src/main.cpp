@@ -221,7 +221,7 @@ bool deflate_cpu(options *args, blocks *compressed_data)
 				code = huf_tab.codes[285];
 				code_length = huf_tab.length[285];
 			}
-			printf("packing %x length %d byte %x bit %d\n", code, code_length, cur_byte, cur_bit);
+			//printf("packing %x length %d byte %x bit %d\n", code, code_length, cur_byte, cur_bit);
 			bit_pack(buf, code, code_length, &cur_byte, &cur_bit);
 			if (ld_dist < 4)
 			{
@@ -245,13 +245,13 @@ bool deflate_cpu(options *args, blocks *compressed_data)
 				code = (code << shift) | ((ld_dist - (mod << 1)) % mod);
 				code_length = 5 + shift;
 			}
-			printf("packing %x length %d byte %x bit %d\n", code, code_length, cur_byte, cur_bit);
+			//printf("packing %x length %d byte %x bit %d\n", code, code_length, cur_byte, cur_bit);
 			bit_pack(buf, code, code_length, &cur_byte, &cur_bit);
 			cur_ld_pair++;
 		}
 		else if (!ld_coded -> is_match -> at(i)) //pack literal data
 		{
-			printf("packing %x length %d byte %x bit %d\n", huf_tab.codes[ld_coded -> uncompressed_data -> at(i)], huf_tab.length[ld_coded -> uncompressed_data -> at(i)], cur_byte, cur_bit);
+			//printf("packing %x length %d byte %x bit %d\n", huf_tab.codes[ld_coded -> uncompressed_data -> at(i)], huf_tab.length[ld_coded -> uncompressed_data -> at(i)], cur_byte, cur_bit);
 			bit_pack(buf, huf_tab.codes[ld_coded -> uncompressed_data -> at(i)], huf_tab.length[ld_coded -> uncompressed_data -> at(i)], &cur_byte, &cur_bit);
 		}
 		if (cur_byte > 1 && cur_bit == 0)
@@ -259,7 +259,7 @@ bool deflate_cpu(options *args, blocks *compressed_data)
 			compressed_data -> data -> reserve(compressed_data -> data -> size() + cur_byte);
 			for(size_t j = 0; j < cur_byte; j++)
 			{
-				printf("pushing %x\n", buf[j]);
+				//printf("pushing %x\n", buf[j]);
 				compressed_data -> data -> push_back(buf[j]);
 			}
 			cur_byte = 0;
