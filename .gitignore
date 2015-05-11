@@ -14,3 +14,15 @@ build/*
 *.ptx
 *.cubin
 *.fatbin
+
+# LaTeX
+*blx.bib 
+*.aux
+*.bbl
+*.blg
+*.dvi
+*.log
+*.out
+*.pdf
+*.ps
+*.run.xml

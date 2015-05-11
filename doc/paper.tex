@@ -1,0 +1,153 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Journal Article
+% LaTeX Template
+% Version 1.3 (9/9/13)
+%
+% This template has been downloaded from:
+% http://www.LaTeXTemplates.com
+%
+% Original author:
+% Frits Wenneker (http://www.howtotex.com)
+%
+% License:
+% CC BY-NC-SA 3.0 (http://creativecommons.org/licenses/by-nc-sa/3.0/)
+%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%----------------------------------------------------------------------------------------
+%	PACKAGES AND OTHER DOCUMENT CONFIGURATIONS
+%----------------------------------------------------------------------------------------
+
+\documentclass[twoside]{article}
+
+%\usepackage{lipsum} % Package to generate dummy text throughout this template
+
+\usepackage[sc]{mathpazo} % Use the Palatino font
+\usepackage[T1]{fontenc} % Use 8-bit encoding that has 256 glyphs
+\linespread{1.05} % Line spacing - Palatino needs more space between lines
+\usepackage{microtype} % Slightly tweak font spacing for aesthetics
+
+\usepackage[hmarginratio=1:1,top=32mm,columnsep=20pt]{geometry} % Document margins
+\usepackage{multicol} % Used for the two-column layout of the document
+\usepackage[hang, small,labelfont=bf,up,textfont=it,up]{caption} % Custom captions under/above floats in tables or figures
+\usepackage{booktabs} % Horizontal rules in tables
+\usepackage{float} % Required for tables and figures in the multi-column environment - they need to be placed in specific locations with the [H] (e.g. \begin{table}[H])
+\usepackage[hidelinks]{hyperref} % For hyperlinks in the PDF
+
+\usepackage{lettrine} % The lettrine is the first enlarged letter at the beginning of the text
+\usepackage{paralist} % Used for the compactitem environment which makes bullet points with less space between them
+
+\usepackage{abstract} % Allows abstract customization
+\renewcommand{\abstractnamefont}{\normalfont\bfseries} % Set the "Abstract" text to bold
+\renewcommand{\abstracttextfont}{\normalfont\small\itshape} % Set the abstract itself to small italic text
+
+\usepackage{titlesec} % Allows customization of titles
+\renewcommand\thesection{\Roman{section}} % Roman numerals for the sections
+\renewcommand\thesubsection{\Roman{subsection}} % Roman numerals for subsections
+\titleformat{\section}[block]{\large\scshape\centering}{\thesection.}{1em}{} % Change the look of the section titles
+\titleformat{\subsection}[block]{\large}{\thesubsection.}{1em}{} % Change the look of the section titles
+
+%\usepackage{fancyhdr} % Headers and footers
+%\pagestyle{fancy} % All pages have headers and footers
+%\fancyhead{} % Blank out the default header
+%\fancyfoot{} % Blank out the default footer
+%\fancyhead[C]{Running title $\bullet$ November 2012 $\bullet$ Vol. XXI, No. 1} % Custom header text
+%\fancyfoot[RO,LE]{\thepage} % Custom footer text
+
+\usepackage[backend=bibtex,style=alphabetic]{biblatex}
+\addbibresource{paper.bib}
+
+%----------------------------------------------------------------------------------------
+%	TITLE SECTION
+%----------------------------------------------------------------------------------------
+
+\title{\vspace{-15mm}\fontsize{23pt}{10pt}\selectfont\textbf{Parallel Data Compression using CUDA}} % Article title
+
+\author{
+\large
+\textsc{Dan Foster}\\[2mm] % Your name
+\normalsize Rensselaer Polytechnic Institute \\ % Your institution
+\normalsize \href{mailto:fosted3@rpi.edu}{fosted3@rpi.edu} % Your email address
+\vspace{-5mm}
+}
+\date{}
+
+%----------------------------------------------------------------------------------------
+
+\begin{document}
+
+\maketitle % Insert title
+
+%\thispagestyle{fancy} % All pages have headers and footers
+
+%----------------------------------------------------------------------------------------
+%	ABSTRACT
+%----------------------------------------------------------------------------------------
+
+\begin{abstract}
+
+%\noindent \lipsum[1] % Dummy abstract text
+\noindent We present a parallel implementation of the DEFLATE algorithm in CUDA and C++. Our approach parallelizes the length-distance encoding and the Huffman coding using CUDA and Thrust. A sequential implementation is also provided as a benchmark reference. Both the parallel and sequential implementations are provided as source code in cugzip, available on GitHub.
+
+\end{abstract}
+
+%----------------------------------------------------------------------------------------
+%	ARTICLE CONTENTS
+%----------------------------------------------------------------------------------------
+
+\begin{multicols}{2} % Two-column layout throughout the main article text
+
+\section{Introduction}
+
+\lettrine[nindent=0em,lines=3]{I} n this work, we implement the DEFLATE algorithm, used in file compressors like gzip and in file formats like PNG \cite{RFC1950}. DEFLATE is well-organized to be computed sequentially, as the length-distance encoding heavily relies on previous data in the file. DEFLATE can also be run with a minimum memory footprint, as it only requires the last 32KiB of the file to be loaded into memory. Methods of improving prefix lookup such as hash tables increase speed but can significantly increase memory load. For parallel computation, loading the entire file, or significant portions of the file, into memory is unavoidable. The serial implementation makes use of the same data structures as the parallel implementation, and therefore also loads the entire file into memory.
+
+%------------------------------------------------
+
+\section{Length-Distance Coding}
+
+The first stage of compression is encoding the file with Length-Distance encoding. This process finds repeated substrings in the input file and replaces them with a length and distance pair. Match lengths range from 3 bytes to 258 bytes (represented as a single byte) and match distances range from 1 byte to 32768 bytes (represented as two bytes).
+
+\subsection{CPU Implementation}
+
+In the CPU version of the algorithm, the file is read sequentially. The next three bytes are used as a key for a hash table. If the byte pair exists within 32KiB, the program reads up to an additional 255 bytes from each file location to determine the match length. The length distance pair is then stored on a vector. Sections are marked off as matches to prevent the compressor from inserting pairs into space that will be compressed. However, future matches can refer to previously compressed data, as the decompressor reads the file sequentially. Support for SMP systems is planned, and some framework is in place, but is not currently implemented. At least two passes will be required for optimal compression if block size is not significantly larger than the window size (32KiB), as blocks support length-distance matching from previous blocks.
+
+\subsection{GPU Implementation}
+
+In the GPU version of the algorithm, the file is loaded into memory as an array of single byte words. A second (match) array of 4 byte words is generated by copying three byte substrings from the initial array to generate all three byte substrings present in the file. A third (index) array of four byte words is generated, each element containing its own index. The usage of four byte indicies limits the file size to 4GiB, although memory limits on current generation CUDA hardware is reached before this. The index array is then stable-sorted, using the match index as key values. From here, the matches need to be expanded, as they only encode the three byte minimums. Implementation past this point has not been completed. Expanding matches could be achieved by dispatching multiple kernels operating on different streams to minimize kernel launch latency and scatter-gather latency. The number of active warps per kernel may not exceed 10 if the input file is not sufficiently large or repetitive, launch overhead may dominate compute time.
+
+%------------------------------------------------
+
+\section{Huffman Coding}
+
+The second stage of compression is encoding the data using Huffman coding. The Huffman tree is composed of 288 symbols. Symbols 0 through 255 represent literal bytes, symbol 256 represents the end of an encoded block (EOB), and symbols 257 through 285 are used for length-distance encoding. Symbols 286 and 287 are not used\cite{RFC1951}. The gzip file format supports both dynamically generated Huffman trees and a static Huffman tree. cugzip only supports static trees as of the current (May 2015) version.
+
+\subsection{CPU Implementation}
+
+The CPU version of Huffman coding reads through the data sequentially, writing Huffman coded data to a 2MiB buffer. When the stored data is over 1MiB and aligned to a byte boundary, it is pushed onto a vector. The buffer is used to reduce overhead for vector re-sizing, which is done before every buffer copy.
+
+\subsection{GPU Implementation}
+
+The GPU version of Huffman coding has not been completed. What follows is a higher level overview of a possible method of implementation. The length-distance coded input can be cast to a four byte word array. Bytes with values of less than 0x100 are literal bytes, bytes with greater values are length-distance codes. A lookup table for code-length pairs can feasibly be fit in shared memory or constant texture memory. Each thread can then make a direct translation to a two byte word array of codes and a one byte array of lengths. The array pair can then be written to disk via the CPU, or the GPU can process the arrays into a single byte word array by finding byte aligned boundaries.
+
+%------------------------------------------------
+
+\section{gzip File Generation}
+
+The Huffman coding algorithm produces a single byte word array via bit-packing.
+
+
+%------------------------------------------------
+
+\section{Discussion}
+
+The DEFLATE algorithm is highly dependent on previous information, and is thus difficult to parallelize. The amount of computation that needs to be done in order to overcome the limitations of a massively parallel SIMD system and the resulting code complexity overshadows possible performance gains. Parallelization on a SMP MIMD system can be done more efficiently as threads can execute differing instructions simultaneously. CUDA systems may perform better by concurrently executing smaller kernels, however, this option has not been explored fully.
+
+%------------------------------------------------
+
+\printbibliography
+
+%------------------------------------------------
+
+\end{multicols}
+
+\end{document}
